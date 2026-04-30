@@ -26,24 +26,42 @@ import static com.alibaba.cloud.ai.dataagent.constant.Constant.SCHEMA_RECALL_NOD
 import static com.alibaba.cloud.ai.graph.StateGraph.END;
 
 /**
- * 根据查询增强结果决定下一个节点的分发器
+ * 查询增强节点（QueryEnhanceNode）的路由分发器。
+ * <p>
+ * 查询增强是 RAG（检索增强生成）流水线中的关键环节：将用户的自然语言查询改写为更规范的
+ * "标准查询"（canonicalQuery），同时生成多个"扩展查询"（expandedQueries）以提高召回率。
+ * <p>
+ * 本分发器的路由逻辑：
+ * <ul>
+ *   <li>如果 LLM 未能生成有效的标准查询或扩展查询，说明查询改写失败，直接结束流程</li>
+ *   <li>如果改写成功，路由到 SchemaRecallNode（表结构召回），利用扩展查询从向量数据库中
+ *       检索最相关的数据库表/字段元信息</li>
+ * </ul>
+ *
+ * @see com.alibaba.cloud.ai.graph.action.EdgeAction
  */
 @Slf4j
 public class QueryEnhanceDispatcher implements EdgeAction {
 
+	/**
+	 * 根据查询增强的输出结果决定下一个节点。
+	 *
+	 * @param state 工作流全局状态对象
+	 * @return SCHEMA_RECALL_NODE（表结构召回）或 END
+	 */
 	@Override
 	public String apply(OverAllState state) throws Exception {
-		// 获取查询处理结果
 		QueryEnhanceOutputDTO queryProcessOutput = StateUtil.getObjectValue(state, QUERY_ENHANCE_NODE_OUTPUT,
 				QueryEnhanceOutputDTO.class);
 
-		// 检查查询处理结果是否为空
+		// LLM 未返回查询改写结果，无法继续
 		if (queryProcessOutput == null) {
 			log.warn("Query process output is null, ending conversation");
 			return END;
 		}
 
-		// 检查各个字段是否为空
+		// canonicalQuery：用户查询的规范化版本（例如去除歧义、补全省略信息）
+		// expandedQueries：基于原始查询生成的多个同义/相关查询，用于提高向量检索的召回率
 		boolean isCanonicalQueryEmpty = queryProcessOutput.getCanonicalQuery() == null
 				|| queryProcessOutput.getCanonicalQuery().trim().isEmpty();
 		boolean isExpandedQueriesEmpty = queryProcessOutput.getExpandedQueries() == null
